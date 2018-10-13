@@ -1,6 +1,6 @@
 # coding: utf-8
 # pylint: disable = invalid-name, W0105, C0111, C0301
-"""Scikit-Learn Wrapper interface for LightGBM."""
+"""Scikit-learn wrapper interface for LightGBM."""
 from __future__ import absolute_import
 
 import numpy as np
@@ -16,10 +16,13 @@ from .engine import train
 
 
 def _objective_function_wrapper(func):
-    """Decorate an objective function
-    Note: for multi-class task, the y_pred is group by class_id first, then group by row_id.
-          If you want to get i-th row y_pred in j-th class, the access way is y_pred[j * num_data + i]
-          and you should group grad and hess in this way as well.
+    """Decorate an objective function.
+
+    Note
+    ----
+    For multi-class task, the y_pred is group by class_id first, then group by row_id.
+    If you want to get i-th row y_pred in j-th class, the access way is y_pred[j * num_data + i]
+    and you should group grad and hess in this way as well.
 
     Parameters
     ----------
@@ -37,15 +40,13 @@ def _objective_function_wrapper(func):
     new_func : callable
         The new objective function as expected by ``lightgbm.engine.train``.
         The signature is ``new_func(preds, dataset)``:
-
-        preds : array-like of shape = [n_samples] or shape = [n_samples * n_classes]
-            The predicted values.
-        dataset : ``dataset``
-            The training set from which the labels will be extracted using
-            ``dataset.get_label()``.
+            preds : array-like of shape = [n_samples] or shape = [n_samples * n_classes]
+                The predicted values.
+            dataset : ``Dataset`` object
+                The training set from which the labels will be extracted using ``Dataset.get_label()``.
     """
     def inner(preds, dataset):
-        """internal function"""
+        """Call passed function with appropriate arguments."""
         labels = dataset.get_label()
         argc = argc_(func)
         if argc == 2:
@@ -76,19 +77,21 @@ def _objective_function_wrapper(func):
 
 
 def _eval_function_wrapper(func):
-    """Decorate an eval function
-    Note: for multi-class task, the y_pred is group by class_id first, then group by row_id.
-          If you want to get i-th row y_pred in j-th class, the access way is y_pred[j * num_data + i].
+    """Decorate an eval function.
+
+    Note
+    ----
+    For multi-class task, the y_pred is group by class_id first, then group by row_id.
+    If you want to get i-th row y_pred in j-th class, the access way is y_pred[j * num_data + i].
 
     Parameters
     ----------
     func : callable
-        Expects a callable with following functions:
-            ``func(y_true, y_pred)``,
-            ``func(y_true, y_pred, weight)``
-         or ``func(y_true, y_pred, weight, group)``
-            and return (eval_name->str, eval_result->float, is_bigger_better->Bool):
-
+        Expects a callable with following signatures:
+        ``func(y_true, y_pred)``,
+        ``func(y_true, y_pred, weight)``
+        or ``func(y_true, y_pred, weight, group)``
+        and return (eval_name->string, eval_result->float, is_bigger_better->bool):
             y_true : array-like of shape = [n_samples]
                 The target values.
             y_pred : array-like of shape = [n_samples] or shape = [n_samples * n_classes] (for multi-class)
@@ -103,15 +106,13 @@ def _eval_function_wrapper(func):
     new_func : callable
         The new eval function as expected by ``lightgbm.engine.train``.
         The signature is ``new_func(preds, dataset)``:
-
-        preds : array-like of shape = [n_samples] or shape = [n_samples * n_classes]
-            The predicted values.
-        dataset : ``dataset``
-            The training set from which the labels will be extracted using
-            ``dataset.get_label()``.
+            preds : array-like of shape = [n_samples] or shape = [n_samples * n_classes]
+                The predicted values.
+            dataset : ``Dataset`` object
+                The training set from which the labels will be extracted using ``Dataset.get_label()``.
     """
     def inner(preds, dataset):
-        """internal function"""
+        """Call passed function with appropriate arguments."""
         labels = dataset.get_label()
         argc = argc_(func)
         if argc == 2:
@@ -135,7 +136,7 @@ class LGBMModel(_LGBMModelBase):
                  subsample=1., subsample_freq=0, colsample_bytree=1.,
                  reg_alpha=0., reg_lambda=0., random_state=None,
                  n_jobs=-1, silent=True, importance_type='split', **kwargs):
-        """Construct a gradient boosting model.
+        r"""Construct a gradient boosting model.
 
         Parameters
         ----------
@@ -197,12 +198,13 @@ class LGBMModel(_LGBMModelBase):
             The type of feature importance to be filled into ``feature_importances_``.
             If "split", result contains numbers of times the feature is used in a model.
             If "gain", result contains total gains of splits which use the feature.
-        **kwargs : other parameters
+        **kwargs
+            Other parameters for the model.
             Check http://lightgbm.readthedocs.io/en/latest/Parameters.html for more parameters.
 
             Note
             ----
-            \\*\\*kwargs is not supported in sklearn, it may cause unexpected issues.
+            \*\*kwargs is not supported in sklearn, it may cause unexpected issues.
 
         Attributes
         ----------
@@ -282,12 +284,37 @@ class LGBMModel(_LGBMModelBase):
         self.set_params(**kwargs)
 
     def get_params(self, deep=True):
+        """Get parameters for this estimator.
+
+        Parameters
+        ----------
+        deep : bool, optional (default=True)
+            If True, will return the parameters for this estimator and
+            contained subobjects that are estimators.
+
+        Returns
+        -------
+        params : dict
+            Parameter names mapped to their values.
+        """
         params = super(LGBMModel, self).get_params(deep=deep)
         params.update(self._other_params)
         return params
 
     # minor change to support `**kwargs`
     def set_params(self, **params):
+        """Set the parameters of this estimator.
+
+        Parameters
+        ----------
+        **params
+            Parameter names with their new values.
+
+        Returns
+        -------
+        self : object
+            Returns self.
+        """
         for key, value in params.items():
             setattr(self, key, value)
             if hasattr(self, '_' + key):
@@ -539,7 +566,8 @@ class LGBMModel(_LGBMModelBase):
             like SHAP interaction values,
             you can install shap package (https://github.com/slundberg/shap).
 
-        **kwargs : other parameters for the prediction
+        **kwargs
+            Other parameters for the prediction.
 
         Returns
         -------
@@ -629,7 +657,7 @@ class LGBMRegressor(LGBMModel, _LGBMRegressorBase):
             eval_set=None, eval_names=None, eval_sample_weight=None,
             eval_init_score=None, eval_metric=None, early_stopping_rounds=None,
             verbose=True, feature_name='auto', categorical_feature='auto', callbacks=None):
-
+        """Docstring is inherited from the LGBMModel."""
         super(LGBMRegressor, self).fit(X, y, sample_weight=sample_weight,
                                        init_score=init_score, eval_set=eval_set,
                                        eval_names=eval_names,
@@ -656,6 +684,7 @@ class LGBMClassifier(LGBMModel, _LGBMClassifierBase):
             eval_class_weight=None, eval_init_score=None, eval_metric=None,
             early_stopping_rounds=None, verbose=True,
             feature_name='auto', categorical_feature='auto', callbacks=None):
+        """Docstring is inherited from the LGBMModel."""
         _LGBMAssertAllFinite(y)
         _LGBMCheckClassificationTargets(y)
         self._le = _LGBMLabelEncoder().fit(y)
@@ -704,6 +733,7 @@ class LGBMClassifier(LGBMModel, _LGBMClassifierBase):
 
     def predict(self, X, raw_score=False, num_iteration=None,
                 pred_leaf=False, pred_contrib=False, **kwargs):
+        """Docstring is inherited from the LGBMModel."""
         result = self.predict_proba(X, raw_score, num_iteration,
                                     pred_leaf, pred_contrib, **kwargs)
         if raw_score or pred_leaf or pred_contrib:
@@ -739,7 +769,8 @@ class LGBMClassifier(LGBMModel, _LGBMClassifierBase):
             like SHAP interaction values,
             you can install shap package (https://github.com/slundberg/shap).
 
-        **kwargs : other parameters for the prediction
+        **kwargs
+            Other parameters for the prediction.
 
         Returns
         -------
@@ -781,6 +812,7 @@ class LGBMRanker(LGBMModel):
             eval_init_score=None, eval_group=None, eval_metric=None,
             eval_at=[1], early_stopping_rounds=None, verbose=True,
             feature_name='auto', categorical_feature='auto', callbacks=None):
+        """Docstring is inherited from the LGBMModel."""
         # check group data
         if group is None:
             raise ValueError("Should set group for ranking task")

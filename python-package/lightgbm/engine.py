@@ -1,6 +1,6 @@
 # coding: utf-8
 # pylint: disable = invalid-name, W0105
-"""Training Library containing training routines of LightGBM."""
+"""Training library containing training routines of LightGBM."""
 from __future__ import absolute_import
 
 import collections
@@ -31,11 +31,11 @@ def train(params, train_set, num_boost_round=100,
         Parameters for training.
     train_set : Dataset
         Data to be trained.
-    num_boost_round: int, optional (default=100)
+    num_boost_round : int, optional (default=100)
         Number of boosting iterations.
-    valid_sets: list of Datasets or None, optional (default=None)
+    valid_sets : list of Datasets or None, optional (default=None)
         List of data to be evaluated during training.
-    valid_names: list of string or None, optional (default=None)
+    valid_names : list of string or None, optional (default=None)
         Names of ``valid_sets``.
     fobj : callable or None, optional (default=None)
         Customized objective function.
@@ -60,22 +60,22 @@ def train(params, train_set, num_boost_round=100,
         All values in categorical features should be less than int32 max value (2147483647).
         Large values could be memory consuming. Consider using consecutive integers starting from zero.
         All negative values in categorical features will be treated as missing values.
-    early_stopping_rounds: int or None, optional (default=None)
+    early_stopping_rounds : int or None, optional (default=None)
         Activates early stopping. The model will train until the validation score stops improving.
         Validation score needs to improve at least every ``early_stopping_rounds`` round(s)
         to continue training.
         Requires at least one validation data and one metric.
         If there's more than one, will check all of them. But the training data is ignored anyway.
         If early stopping occurs, the model will add ``best_iteration`` field.
-    evals_result: dict or None, optional (default=None)
+    evals_result : dict or None, optional (default=None)
         This dictionary used to store all evaluation results of all the items in ``valid_sets``.
 
         Example
         -------
         With a ``valid_sets`` = [valid_set, train_set],
         ``valid_names`` = ['eval', 'train']
-        and a ``params`` = ('metric':'logloss')
-        returns: {'train': {'logloss': ['0.48253', '0.35953', ...]},
+        and a ``params`` = {'metric': 'logloss'}
+        returns {'train': {'logloss': ['0.48253', '0.35953', ...]},
         'eval': {'logloss': ['0.480385', '0.357756', ...]}}.
     verbose_eval : bool or int, optional (default=True)
         Requires at least one validation data.
@@ -87,7 +87,7 @@ def train(params, train_set, num_boost_round=100,
         -------
         With ``verbose_eval`` = 4 and at least one item in evals,
         an evaluation metric is printed every 4 (instead of 1) boosting stages.
-    learning_rates: list, callable or None, optional (default=None)
+    learning_rates : list, callable or None, optional (default=None)
         List of learning rates for each boosting round
         or a customized function that calculates ``learning_rate``
         in terms of current number of round (e.g. yields learning rate decay).
@@ -238,31 +238,30 @@ def train(params, train_set, num_boost_round=100,
     return booster
 
 
-class CVBooster(object):
-    """"Auxiliary data struct to hold all boosters of CV."""
+class _CVBooster(object):
+    """Auxiliary data struct to hold all boosters of CV."""
+
     def __init__(self):
         self.boosters = []
         self.best_iteration = -1
 
     def append(self, booster):
-        """add a booster to CVBooster"""
+        """Add a booster to _CVBooster."""
         self.boosters.append(booster)
 
     def __getattr__(self, name):
-        """redirect methods call of CVBooster"""
-        def handlerFunction(*args, **kwargs):
-            """call methods with each booster, and concatenate their results"""
+        """Redirect methods call of _CVBooster."""
+        def handler_function(*args, **kwargs):
+            """Call methods with each booster, and concatenate their results."""
             ret = []
             for booster in self.boosters:
                 ret.append(getattr(booster, name)(*args, **kwargs))
             return ret
-        return handlerFunction
+        return handler_function
 
 
 def _make_n_folds(full_data, folds, nfold, params, seed, fpreproc=None, stratified=True, shuffle=True):
-    """
-    Make an n-fold list of Booster from random indices.
-    """
+    """Make an n-fold list of Booster from random indices."""
     full_data = full_data.construct()
     num_data = full_data.num_data()
     if folds is not None:
@@ -301,7 +300,7 @@ def _make_n_folds(full_data, folds, nfold, params, seed, fpreproc=None, stratifi
             train_id = [np.concatenate([test_id[i] for i in range_(nfold) if k != i]) for k in range_(nfold)]
             folds = zip_(train_id, test_id)
 
-    ret = CVBooster()
+    ret = _CVBooster()
     for train_idx, test_idx in folds:
         train_set = full_data.subset(train_idx)
         valid_set = full_data.subset(test_idx)
@@ -317,9 +316,7 @@ def _make_n_folds(full_data, folds, nfold, params, seed, fpreproc=None, stratifi
 
 
 def _agg_cv_result(raw_results):
-    """
-    Aggregate cross-validation results.
-    """
+    """Aggregate cross-validation results."""
     cvmap = collections.defaultdict(list)
     metric_type = {}
     for one_result in raw_results:
@@ -356,7 +353,7 @@ def cv(params, train_set, num_boost_round=100,
         Number of folds in CV.
     stratified : bool, optional (default=True)
         Whether to perform stratified sampling.
-    shuffle: bool, optional (default=True)
+    shuffle : bool, optional (default=True)
         Whether to shuffle before splitting data.
     metrics : string, list of strings or None, optional (default=None)
         Evaluation metrics to be monitored while CV.
@@ -384,7 +381,7 @@ def cv(params, train_set, num_boost_round=100,
         All values in categorical features should be less than int32 max value (2147483647).
         Large values could be memory consuming. Consider using consecutive integers starting from zero.
         All negative values in categorical features will be treated as missing values.
-    early_stopping_rounds: int or None, optional (default=None)
+    early_stopping_rounds : int or None, optional (default=None)
         Activates early stopping.
         CV score needs to improve at least every ``early_stopping_rounds`` round(s)
         to continue.
