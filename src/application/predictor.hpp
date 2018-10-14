@@ -5,6 +5,7 @@
 #include <LightGBM/boosting.h>
 #include <LightGBM/utils/text_reader.h>
 #include <LightGBM/dataset.h>
+#include <LightGBM/prediction_early_stop.h>
 
 #include <LightGBM/utils/openmp_wrapper.h>
 

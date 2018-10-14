@@ -1,3 +1,5 @@
+#include <utility>
+
 #include <LightGBM/application.h>
 
 #include <LightGBM/utils/common.h>
@@ -33,7 +35,21 @@ Application::Application(int argc, char** argv) {
   if (config_.num_threads > 0) {
     omp_set_num_threads(config_.num_threads);
   }
-  if (config_.data.size() == 0 && config_.task != TaskType::kConvertModel) {
+  if (config_.data.empty() && config_.task != TaskType::kConvertModel) {
+    Log::Fatal("No training/prediction data, application quit");
+  }
+  omp_set_nested(0);
+}
+
+Application::Application(std::unordered_map<std::string, std::string> params) {
+  // load configs
+  config_.Set(params);
+  Log::Info("Finished loading parameters");
+  // set number of threads for openmp
+  if (config_.num_threads > 0) {
+    omp_set_num_threads(config_.num_threads);
+  }
+  if (config_.data.empty() && config_.task != TaskType::kConvertModel) {
     Log::Fatal("No training/prediction data, application quit");
   }
   omp_set_nested(0);
@@ -59,11 +75,11 @@ void Application::LoadParameters(int argc, char** argv) {
     if (!config_reader.Lines().empty()) {
       for (auto& line : config_reader.Lines()) {
         // remove str after "#"
-        if (line.size() > 0 && std::string::npos != line.find_first_of("#")) {
-          line.erase(line.find_first_of("#"));
+        if (!line.empty() && std::string::npos != line.find_first_of('#')) {
+          line.erase(line.find_first_of('#'));
         }
         line = Common::Trim(line);
-        if (line.size() == 0) {
+        if (line.empty()) {
           continue;
         }
         Config::KV2Map(params, line.c_str());
@@ -116,7 +132,7 @@ void Application::LoadData() {
   }
   // create training metric
   if (config_.is_provide_training_metric) {
-    for (auto metric_type : config_.metric) {
+    for (const auto &metric_type : config_.metric) {
       auto metric = std::unique_ptr<Metric>(Metric::CreateMetric(metric_type, config_));
       if (metric == nullptr) { continue; }
       metric->Init(train_data_->metadata(), train_data_->num_data());
@@ -124,7 +140,6 @@ void Application::LoadData() {
     }
   }
   train_metric_.shrink_to_fit();
-
 
   if (!config_.metric.empty()) {
     // only when have metrics then need to construct validation data
@@ -146,7 +161,7 @@ void Application::LoadData() {
 
       // add metric for validation data
       valid_metrics_.emplace_back();
-      for (auto metric_type : config_.metric) {
+      for (const auto &metric_type : config_.metric) {
         auto metric = std::unique_ptr<Metric>(Metric::CreateMetric(metric_type, config_));
         if (metric == nullptr) { continue; }
         metric->Init(valid_datas_.back()->metadata(),

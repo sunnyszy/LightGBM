@@ -22,16 +22,16 @@ namespace LightGBM {
 class DatasetLoader;
 /*!
 * \brief This class is used to store some meta(non-feature) data for training data,
-*        e.g. labels, weights, initial scores, qurey level informations.
+*        e.g. labels, weights, initial scores, query level information.
 *
 *        Some details:
-*        1. Label, used for traning.
+*        1. Label, used for training.
 *        2. Weights, weighs of records, optional
 *        3. Query Boundaries, necessary for lambdarank.
 *           The documents of i-th query is in [ query_boundarise[i], query_boundarise[i+1] )
 *        4. Query Weights, auto calculate by weights and query_boundarise(if both of them are existed)
 *           the weight for i-th query is sum(query_boundarise[i] , .., query_boundarise[i+1]) / (query_boundarise[i + 1] -  query_boundarise[i+1])
-*        5. Initial score. optional. if exsitng, the model will boost from this score, otherwise will start from 0.
+*        5. Initial score. optional. if existng, the model will boost from this score, otherwise will start from 0.
 */
 class Metadata {
 public:
@@ -277,7 +277,7 @@ public:
 };
 
 /*! \brief The main class of data set,
-*          which are used to traning or validation
+*          which are used for training or validation
 */
 class Dataset {
 public:

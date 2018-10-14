@@ -31,7 +31,7 @@ typedef void* BoosterHandle;
 * \brief get string message of the last error
 *  all function in this file will return 0 when succeed
 *  and -1 when an error occured,
-* \return const char* error inforomation
+* \return const char* error information
 */
 LIGHTGBM_C_EXPORT const char* LGBM_GetLastError();
 
@@ -269,7 +269,7 @@ LIGHTGBM_C_EXPORT int LGBM_DatasetGetFeatureNames(
 LIGHTGBM_C_EXPORT int LGBM_DatasetFree(DatasetHandle handle);
 
 /*!
-* \brief save dateset to binary file
+* \brief save dataset to binary file
 * \param handle a instance of dataset
 * \param filename file name
 * \return 0 when succeed, -1 when failure happens
@@ -330,7 +330,7 @@ LIGHTGBM_C_EXPORT int LGBM_DatasetGetNumFeature(DatasetHandle handle,
 // --- start Booster interfaces
 
 /*!
-* \brief create an new boosting learner
+* \brief create a new boosting learner
 * \param train_data training data set
 * \param parameters format: 'key1=value1 key2=value2'
 * \prama out handle of created Booster
@@ -422,7 +422,7 @@ LIGHTGBM_C_EXPORT int LGBM_BoosterGetNumClasses(BoosterHandle handle, int* out_l
 /*!
 * \brief update the model in one round
 * \param handle handle
-* \param is_finished 1 means finised(cannot split any more)
+* \param is_finished 1 means finished(cannot split any more)
 * \return 0 when succeed, -1 when failure happens
 */
 LIGHTGBM_C_EXPORT int LGBM_BoosterUpdateOneIter(BoosterHandle handle, int* is_finished);
@@ -516,7 +516,7 @@ Note: 1. you should call LGBM_BoosterGetEvalNames first to get the name of evalu
 * \param handle handle
 * \param data_idx 0:training data, 1: 1st valid data, 2:2nd valid data ...
 * \param out_len len of output result
-* \param out_result float arrary contains result
+* \param out_result float array contains result
 * \return 0 when succeed, -1 when failure happens
 */
 LIGHTGBM_C_EXPORT int LGBM_BoosterGetEval(BoosterHandle handle,
@@ -787,7 +787,7 @@ LIGHTGBM_C_EXPORT int LGBM_BoosterFeatureImportance(BoosterHandle handle,
                                                     double* out_results);
 
 /*!
-* \brief Initilize the network
+* \brief Initialize the network
 * \param machines represent the nodes, format: ip1:port1,ip2:port2
 * \param local_listen_port
 * \param listen_time_out

@@ -26,10 +26,12 @@ class Application {
 public:
   Application(int argc, char** argv);
 
+  Application(std::unordered_map<std::string, std::string> params);
+
   /*! \brief Destructor */
   ~Application();
 
-  /*! \brief To call this funciton to run application*/
+  /*! \brief To call this function to run application*/
   inline void Run();
 
 private:

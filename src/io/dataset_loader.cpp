@@ -218,8 +218,6 @@ Dataset* DatasetLoader::LoadFromFile(const char* filename, const char* initscore
   return dataset.release();
 }
 
-
-
 Dataset* DatasetLoader::LoadFromFileAlignWithOtherDataset(const char* filename, const char* initscore_file, const Dataset* train_data) {
   data_size_t num_global_data = 0;
   std::vector<data_size_t> used_data_indices;
@@ -498,7 +496,7 @@ Dataset* DatasetLoader::LoadFromBinFile(const char* data_filename, const char* b
   return dataset.release();
 }
 
-Dataset* DatasetLoader::CostructFromSampleData(double** sample_values,
+Dataset* DatasetLoader::ConstructFromSampleData(double** sample_values,
                                                int** sample_indices, int num_col, const int* num_per_col,
                                                size_t total_sample_size, data_size_t num_data) {
   std::vector<std::unique_ptr<BinMapper>> bin_mappers(num_col);
