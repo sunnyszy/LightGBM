@@ -18,16 +18,16 @@ Critical
 
 Please post an issue in `Microsoft/LightGBM repository <https://github.com/Microsoft/LightGBM/issues>`__ for any
 LightGBM issues you encounter. For critical issues (crash, prediction error, nonsense outputs...), you may also ping a
-member of the core team according the relevant area of expertise by mentioning them with the arobase (@) symbol:
+member of the core team according to the relevant area of expertise by mentioning them with the arobase (@) symbol:
 
--  `@guolinke <https://github.com/guolinke>`__ (C++ code / R-package / Python-package)
--  `@chivee <https://github.com/chivee>`__ (C++ code / Python-package)
--  `@Laurae2 <https://github.com/Laurae2>`__ (R-package)
--  `@jameslamb <https://github.com/jameslamb>`__ (R-package)
--  `@wxchan <https://github.com/wxchan>`__ (Python-package)
--  `@henry0312 <https://github.com/henry0312>`__ (Python-package)
--  `@StrikerRUS <https://github.com/StrikerRUS>`__ (Python-package)
--  `@huanzhang12 <https://github.com/huanzhang12>`__ (GPU support)
+-  `@guolinke <https://github.com/guolinke>`__ **Guolin Ke** (C++ code / R-package / Python-package)
+-  `@chivee <https://github.com/chivee>`__ **Qiwei Ye** (C++ code / Python-package)
+-  `@Laurae2 <https://github.com/Laurae2>`__ **Damien Soukhavong** (R-package)
+-  `@jameslamb <https://github.com/jameslamb>`__ **James Lamb** (R-package)
+-  `@wxchan <https://github.com/wxchan>`__ **Wenxuan Chen** (Python-package)
+-  `@henry0312 <https://github.com/henry0312>`__ **Tsukasa Omoto** (Python-package)
+-  `@StrikerRUS <https://github.com/StrikerRUS>`__ **Nikita Titov** (Python-package)
+-  `@huanzhang12 <https://github.com/huanzhang12>`__ **Huan Zhang** (GPU support)
 
 Please include as much of the following information as possible when submitting a critical issue:
 
@@ -56,7 +56,7 @@ LightGBM
 
 --------------
 
--  **Question 2**: On datasets with million of features, training does not start (or starts after a very long time).
+-  **Question 2**: On datasets with millions of features, training does not start (or starts after a very long time).
 
 -  **Solution 2**: Use a smaller value for ``bin_construct_sample_cnt`` and a larger value for ``min_data``.
 
@@ -106,15 +106,12 @@ LightGBM
 --------------
 
 -  **Question 9**: When I'm trying to specify a categorical column with the ``categorical_feature`` parameter,
-   I get the following sequence of errors, but there are no negative values in the column.
+   I get the following sequence of warnings, but there are no negative values in the column.
 
    ::
 
        [LightGBM] [Warning] Met negative value in categorical features, will convert it to NaN
-       [LightGBM] [Fatal] Cannot construct Dataset since there are no useful features.
-       It should be at least two unique rows.
-       If the num_row (num_data) is small, you can set min_data=1 and min_data_in_bin=1 to fix this.
-       Otherwise, please make sure you are using the right dataset
+       [LightGBM] [Warning] There are no meaningful features, as all feature values are constant.
 
 -  **Solution 9**: The column you're trying to pass via ``categorical_feature`` likely contains very large values.
    Categorical features in LightGBM are limited by int32 range,

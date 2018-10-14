@@ -320,7 +320,7 @@ class _InnerPredictor(object):
     Note: Can convert from Booster, but cannot convert to Booster
     """
     def __init__(self, model_file=None, booster_handle=None, pred_parameter=None):
-        """Initialize the _InnerPredictor. Not expose to user
+        """Initialize the _InnerPredictor. Not exposed to user
 
         Parameters
         ----------
@@ -629,7 +629,7 @@ class Dataset(object):
                  weight=None, group=None, init_score=None, silent=False,
                  feature_name='auto', categorical_feature='auto', params=None,
                  free_raw_data=True):
-        """Constract Dataset.
+        """Construct Dataset.
 
         Parameters
         ----------
@@ -657,7 +657,7 @@ class Dataset(object):
             If list of strings, interpreted as feature names (need to specify ``feature_name`` as well).
             If 'auto' and data is pandas DataFrame, pandas categorical columns are used.
             All values in categorical features should be less than int32 max value (2147483647).
-            Large values could be memory consuming. Consider to use consecutive integers started from zero.
+            Large values could be memory consuming. Consider using consecutive integers starting from zero.
             All negative values in categorical features will be treated as missing values.
         params : dict or None, optional (default=None)
             Other parameters.
@@ -1046,7 +1046,7 @@ class Dataset(object):
         return ret
 
     def save_binary(self, filename):
-        """Save Dataset to binary file.
+        """Save Dataset to a binary file.
 
         Parameters
         ----------
@@ -1212,7 +1212,7 @@ class Dataset(object):
         Parameters
         ----------
         reference : Dataset
-            Reference that is used as a template to consturct the current Dataset.
+            Reference that is used as a template to construct the current Dataset.
 
         Returns
         -------
@@ -1481,6 +1481,22 @@ class Booster(object):
                 raise TypeError('Training data should be Dataset instance, met {}'
                                 .format(type(train_set).__name__))
             params_str = param_dict_to_str(params)
+            # set network if necessary
+            for alias in ["machines", "workers", "nodes"]:
+                if alias in params:
+                    machines = params[alias]
+                    if isinstance(machines, string_type):
+                        num_machines = len(machines.split(','))
+                    elif isinstance(machines, (list, set)):
+                        num_machines = len(machines)
+                        machines = ','.join(machines)
+                    else:
+                        raise ValueError("Invalid machines in params.")
+                    self.set_network(machines,
+                                     local_listen_port=params.get("local_listen_port", 12400),
+                                     listen_time_out=params.get("listen_time_out", 120),
+                                     num_machines=params.get("num_machines", num_machines))
+                    break
             # construct booster object
             self.handle = ctypes.c_void_p()
             _safe_call(_LIB.LGBM_BoosterCreate(
@@ -1507,22 +1523,6 @@ class Booster(object):
             self.__is_predicted_cur_iter = [False]
             self.__get_eval_info()
             self.pandas_categorical = train_set.pandas_categorical
-            # set network if necessary
-            for alias in ["machines", "workers", "nodes"]:
-                if alias in params:
-                    machines = params[alias]
-                    if isinstance(machines, string_type):
-                        num_machines = len(machines.split(','))
-                    elif isinstance(machines, (list, set)):
-                        num_machines = len(machines)
-                        machines = ','.join(machines)
-                    else:
-                        raise ValueError("Invalid machines in params.")
-                    self.set_network(machines,
-                                     local_listen_port=params.get("local_listen_port", 12400),
-                                     listen_time_out=params.get("listen_time_out", 120),
-                                     num_machines=params.get("num_machines", num_machines))
-                    break
         elif model_file is not None:
             # Prediction task
             out_num_iterations = ctypes.c_int(0)
