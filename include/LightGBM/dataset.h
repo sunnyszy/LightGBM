@@ -36,7 +36,7 @@ class DatasetLoader;
 class Metadata {
 public:
   /*!
-  * \brief Null costructor
+  * \brief Null constructor
   */
   Metadata();
   /*!

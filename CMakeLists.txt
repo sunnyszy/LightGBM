@@ -166,8 +166,8 @@ file(GLOB SOURCES
     src/treelearner/*.cpp
 )
 
-add_executable(lightgbm src/main.cpp ${SOURCES})
-add_library(_lightgbm SHARED src/c_api.cpp src/lightgbm_R.cpp  ${SOURCES})
+add_executable(lightgbm src/main.cpp ${SOURCES} src/test.cpp)
+add_library(_lightgbm SHARED src/c_api.cpp src/lightgbm_R.cpp  ${SOURCES} src/test.cpp)
 
 if(MSVC)
     set_target_properties(_lightgbm PROPERTIES OUTPUT_NAME "lib_lightgbm")

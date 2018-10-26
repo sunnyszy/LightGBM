@@ -393,3 +393,4 @@ lightgbm.Rcheck/
 
 .idea/
 cmake-build-debug/
+*.tr*

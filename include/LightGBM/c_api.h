@@ -72,7 +72,7 @@ LIGHTGBM_C_EXPORT int LGBM_DatasetCreateFromSampledColumn(double** sample_data,
                                                           DatasetHandle* out);
 
 /*!
-* \brief create a empty dataset by reference Dataset
+* \brief create an empty dataset by reference Dataset
 * \param reference used to align bin mapper
 * \param num_total_row number of total rows
 * \param out created dataset

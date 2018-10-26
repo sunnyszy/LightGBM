@@ -227,7 +227,6 @@ void Application::Train() {
 }
 
 void Application::Predict() {
-
   if (config_.task == TaskType::KRefitTree) {
     // create predictor
     Predictor predictor(boosting_.get(), -1, false, true, false, false, 1, 1);
