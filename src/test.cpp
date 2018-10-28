@@ -40,8 +40,8 @@ struct cachedObject {
 
 // from boost hash combine: hashing of std::pairs for unordered_maps
 template <class T>
-inline void hash_combine(std::size_t & seed, const T & v) {
-  std::hash<T> hasher;
+inline void hash_combine(size_t & seed, const T & v) {
+  hash<T> hasher;
   seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
@@ -75,7 +75,6 @@ uint64_t calculateOPT(vector<trEntry> &trace, ifstream &traceFile, uint64_t cach
     trace.emplace_back(id, size, cost);
     lastSeen[idsize] = idx++;
   }
-  cout << idx << endl;
 
   sort(opt.begin(), opt.end(), [](const optEntry& lhs, const optEntry& rhs) {
     return lhs.volume < rhs.volume;
@@ -175,7 +174,7 @@ void deriveFeatures(vector<trEntry> &trace, const string &path, uint64_t cacheSi
   outfile.close();
 }
 
-void check(const vector<trEntry> &opt, const string &path, float cutoff, std::ofstream &out) {
+void check(const vector<trEntry> &opt, const string &path, float cutoff, ofstream &out) {
   ifstream infile(path);
 
   bool lmatch;
@@ -213,21 +212,21 @@ void check(const vector<trEntry> &opt, const string &path, float cutoff, std::of
     }
   }
 
-  out << cutoff << " " << reqs << " " << matchc << " " << double(matchc)/reqs << " " << fn << " " << fp << " "
-      << admc/double(reqs) << "\n";
+  out << cutoff << " " << reqs << " " << double(matchc)/reqs << " " << double(fn)/reqs << " " << double(fp)/reqs << " "
+      << double(admc)/reqs << endl;
 
   infile.close();
 }
 
-void trainModel(const string &trace, const vector<trEntry> &train_opt, const vector<trEntry> &test_opt) {
-  const std::string train_trace = "train_" + trace;
-  const std::string test_trace = "test_" + trace;
-  const std::string model = trace + ".model";
-  const std::string train_result = train_trace + ".predict";
-  const std::string test_result = test_trace + ".predict";
-  const std::string result = trace + ".result";
+void trainModel(const string &trace, bool init) {
+  const string train_trace = "train_" + trace;
+  const string test_trace = "test_" + trace;
+  const string model = trace + ".model";
+  const string train_result = train_trace + ".predict";
+  const string test_result = test_trace + ".predict";
+  const string result = trace + ".result";
 
-  std::unordered_map<std::string, std::string> train_params = {
+  unordered_map<string, string> train_params = {
           {"task", "train"},
           {"boosting", "gbdt"},
           {"objective", "binary"},
@@ -250,18 +249,18 @@ void trainModel(const string &trace, const vector<trEntry> &train_opt, const vec
           {"save_binary", "false"},
           {"data", train_trace},
           {"valid", test_trace},
-//          {"input_model", model},
+          {"input_model", init ? "" : model},
           {"output_model", model}
   };
 
-  std::unordered_map<std::string, std::string> predict_params1 = {
+  unordered_map<string, string> predict_params1 = {
           {"task", "predict"},
           {"data", train_trace},
           {"input_model", model},
           {"output_result", train_result}
   };
 
-  std::unordered_map<std::string, std::string> predict_params2 = {
+  unordered_map<string, string> predict_params2 = {
           {"task", "predict"},
           {"data", test_trace},
           {"input_model", model},
@@ -277,23 +276,6 @@ void trainModel(const string &trace, const vector<trEntry> &train_opt, const vec
   predict_app1.Run();
   LightGBM::Application predict_app2(predict_params2);
   predict_app2.Run();
-
-  // test
-  std::ofstream out;
-  out.open(result);
-  out << trace << " train 0.4\n";
-  check(train_opt, train_result, 0.4, out);
-  out << trace << " test 0.4\n";
-  check(test_opt, test_result, 0.4, out);
-  out << trace << " train 0.5\n";
-  check(train_opt, train_result, 0.5, out);
-  out << trace << " test 0.5\n";
-  check(test_opt, test_result, 0.5, out);
-  out << trace << " train 0.6\n";
-  check(train_opt, train_result, 0.6, out);
-  out << trace << " test 0.6\n";
-  check(test_opt, test_result, 0.6, out);
-  out.close();
 }
 
 int main(int argc, char* argv[]) {
@@ -302,29 +284,33 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  auto timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
-  cout << ctime(&timenow) << endl;
-  cout << "start\n";
   // input path
   const string path = argv[1];
-  // output name
-  string outname;
+  // trace name
+  string trace;
   const size_t dirSlashIdx = path.rfind('/');
   if (string::npos != dirSlashIdx) {
-    outname = path.substr(dirSlashIdx + 1, path.length());
+    trace = path.substr(dirSlashIdx + 1, path.length());
   } else {
-    outname = path;
+    trace = path;
   }
-  cout << outname << endl;
+  const string trainPath = "train_" + trace;
+  const string testPath = "test_" + trace;
   // cache size
   uint64_t cacheSize = stoull(argv[2]);
   // window size
   uint64_t windowSize = stoull(argv[3]);
 
   ifstream traceFile(path);
+  ofstream resultFile(trace + ".result");
+  auto timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
+  resultFile << ctime(&timenow) << "start" << endl;
+  vector<trEntry> trainTrace;
+  vector<trEntry> testTrace;
+  bool init = true;
   while (true) {
-    vector<trEntry> trainTrace;
-    vector<trEntry> testTrace;
+    trainTrace.clear();
+    testTrace.clear();
     uint64_t res = calculateOPT(trainTrace, traceFile, cacheSize, windowSize);
     if (res < windowSize) {
       cerr << "file too short" << endl;
@@ -334,14 +320,26 @@ int main(int argc, char* argv[]) {
     // currently still write features to files first, then load data from file for LightGBM
     // TODO: change to create dataset directly from in memory data structures
     // Try ConstructFromSampleData in dataset_loader.h
-    deriveFeatures(trainTrace, "train_" + outname, cacheSize);
-    deriveFeatures(testTrace, "test_" + outname, cacheSize);
-    trainModel(outname, trainTrace, testTrace);
+    deriveFeatures(trainTrace, trainPath, cacheSize);
+    deriveFeatures(testTrace, testPath, cacheSize);
+    trainModel(trace, init);
+    init = false;
+    for (int cutoff = 1; cutoff < 10; cutoff += 1) {
+      resultFile << trace << " train " << cutoff/10.0 << endl;
+      check(trainTrace, trainPath + ".predict", static_cast<float>(cutoff / 10.0), resultFile);
+      resultFile << trace << " test " << cutoff/10.0 << endl;
+      check(testTrace, testPath + ".predict", static_cast<float>(cutoff / 10.0), resultFile);
+    }
+    resultFile << endl;
+    timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
+    resultFile << ctime(&timenow);
   }
 
+  traceFile.close();
+  resultFile.close();
+
   timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
-  cout << ctime(&timenow) << endl;
-  cout << "end\n";
+  resultFile << ctime(&timenow) << "end" << endl;
 
   return 0;
 }
