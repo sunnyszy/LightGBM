@@ -51,9 +51,8 @@ public:
   }
 
   Booster(const Dataset* train_data,
-          const char* parameters) {
-    auto param = Config::Str2Map(parameters);
-    config_.Set(param);
+          std::unordered_map<std::string, std::string> parameters) {
+    config_.Set(parameters);
     if (config_.num_threads > 0) {
       omp_set_num_threads(config_.num_threads);
     }
@@ -611,13 +610,12 @@ int LGBM_DatasetCreateFromCSR(const void* indptr,
                               int64_t nindptr,
                               int64_t nelem,
                               int64_t num_col,
-                              const char* parameters,
+                              std::unordered_map<std::string, std::string> parameters,
                               const DatasetHandle reference,
                               DatasetHandle* out) {
   API_BEGIN();
-  auto param = Config::Str2Map(parameters);
   Config config;
-  config.Set(param);
+  config.Set(parameters);
   if (config.num_threads > 0) {
     omp_set_num_threads(config.num_threads);
   }
@@ -878,7 +876,7 @@ int LGBM_DatasetGetNumFeature(DatasetHandle handle,
 // ---- start of booster
 
 int LGBM_BoosterCreate(const DatasetHandle train_data,
-                       const char* parameters,
+                       std::unordered_map<std::string, std::string> parameters,
                        BoosterHandle* out) {
   API_BEGIN();
   const Dataset* p_train_data = reinterpret_cast<const Dataset*>(train_data);
@@ -1131,16 +1129,15 @@ int LGBM_BoosterPredictForCSR(BoosterHandle handle,
                               int data_type,
                               int64_t nindptr,
                               int64_t nelem,
-                              int64_t,
+                              int64_t num_col,
                               int predict_type,
                               int num_iteration,
-                              const char* parameter,
+                              std::unordered_map<std::string, std::string> parameter,
                               int64_t* out_len,
                               double* out_result) {
   API_BEGIN();
-  auto param = Config::Str2Map(parameter);
   Config config;
-  config.Set(param);
+  config.Set(parameter);
   if (config.num_threads > 0) {
     omp_set_num_threads(config.num_threads);
   }

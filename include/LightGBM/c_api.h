@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
+#include <unordered_map>
 
 /*!
 * To avoid type conversion on large data, most of our expose interface support both for float_32 and float_64.
@@ -51,7 +53,7 @@ LIGHTGBM_C_EXPORT int LGBM_DatasetCreateFromFile(const char* filename,
                                                  DatasetHandle* out);
 
 /*!
-* \brief create a empty dataset by sampling data.
+* \brief create an empty dataset by sampling data.
 * \param sample_data sampled data, grouped by the column.
 * \param sample_indices indices of sampled data.
 * \param ncol number columns
@@ -147,7 +149,7 @@ LIGHTGBM_C_EXPORT int LGBM_DatasetCreateFromCSR(const void* indptr,
                                                 int64_t nindptr,
                                                 int64_t nelem,
                                                 int64_t num_col,
-                                                const char* parameters,
+                                                std::unordered_map<std::string, std::string> parameters,
                                                 const DatasetHandle reference,
                                                 DatasetHandle* out);
 
@@ -337,7 +339,7 @@ LIGHTGBM_C_EXPORT int LGBM_DatasetGetNumFeature(DatasetHandle handle,
 * \return 0 when succeed, -1 when failure happens
 */
 LIGHTGBM_C_EXPORT int LGBM_BoosterCreate(const DatasetHandle train_data,
-                                         const char* parameters,
+                                         std::unordered_map<std::string, std::string> parameters,
                                          BoosterHandle* out);
 
 /*!
@@ -627,7 +629,7 @@ LIGHTGBM_C_EXPORT int LGBM_BoosterPredictForCSR(BoosterHandle handle,
                                                 int64_t num_col,
                                                 int predict_type,
                                                 int num_iteration,
-                                                const char* parameter,
+                                                std::unordered_map<std::string, std::string> parameter,
                                                 int64_t* out_len,
                                                 double* out_result);
 

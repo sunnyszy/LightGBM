@@ -10,10 +10,27 @@
 #include <vector>
 #include <algorithm>
 #include <LightGBM/application.h>
+#include <LightGBM/c_api.h>
 
 #define HISTFEATURES 50
 
 using namespace std;
+
+// from boost hash combine: hashing of pairs for unordered_maps
+template <class T>
+inline void hash_combine(size_t & seed, const T & v) {
+  hash<T> hasher;
+  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
+template<typename S, typename T> struct hash<pair<S, T>> {
+  inline size_t operator()(const pair<S, T> & v) const {
+    size_t seed = 0;
+    hash_combine(seed, v.first);
+    hash_combine(seed, v.second);
+    return seed;
+  }
+};
 
 struct optEntry {
   uint64_t idx;
@@ -31,148 +48,6 @@ struct trEntry {
 
   trEntry(uint64_t id, uint64_t size, double cost) : id(id), size(size), cost(cost), toCache(false) {};
 };
-
-// cache size tracking
-struct cachedObject {
-  uint64_t osize;
-  bool cached;
-};
-
-// from boost hash combine: hashing of std::pairs for unordered_maps
-template <class T>
-inline void hash_combine(size_t & seed, const T & v) {
-  hash<T> hasher;
-  seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-}
-
-namespace std {
-  template<typename S, typename T> struct hash<pair<S, T>> {
-    inline size_t operator()(const pair<S, T> & v) const {
-      size_t seed = 0;
-      ::hash_combine(seed, v.first);
-      ::hash_combine(seed, v.second);
-      return seed;
-    }
-  };
-}
-
-uint64_t calculateOPT(vector<trEntry> &trace, ifstream &traceFile, uint64_t cacheSize, uint64_t windowSize) {
-  uint64_t seq, id, size, idx = 0;
-  double cost;
-
-  // from (id, size) to idx
-  unordered_map<pair<uint64_t, uint64_t>, uint64_t> lastSeen;
-  vector<optEntry> opt;
-
-  while (idx < windowSize && traceFile >> seq >> id >> size >> cost) {
-    const auto idsize = make_pair(id, size);
-    if (size > 0 && lastSeen.count(idsize) > 0) {
-      opt[lastSeen[idsize]].hasNext = true;
-      const uint64_t volume = (idx - lastSeen[idsize]) * size;
-      opt[lastSeen[idsize]].volume = volume;
-    }
-    opt.emplace_back(idx);
-    trace.emplace_back(id, size, cost);
-    lastSeen[idsize] = idx++;
-  }
-
-  sort(opt.begin(), opt.end(), [](const optEntry& lhs, const optEntry& rhs) {
-    return lhs.volume < rhs.volume;
-  });
-
-  uint64_t csize = 0;
-  for (auto &it: opt) {
-    if (csize > cacheSize) {
-      break;
-    }
-    if (it.hasNext) {
-      trace[it.idx].toCache = true;
-      csize += it.volume / trace.size();
-    }
-  }
-  // whether reach EOF
-  return idx;
-}
-
-// purpose: derive features and count how many features are inconsistent
-void deriveFeatures(vector<trEntry> &trace, const string &path, uint64_t cacheSize) {
-  ofstream outfile(path);
-  int64_t cacheAvailBytes = cacheSize;
-  // from id to intervals
-  unordered_map<uint64_t, list<uint64_t> > statistics;
-  // from id to object
-  unordered_map<uint64_t, cachedObject> cache;
-  uint64_t negcachesize = 0;
-
-  uint64_t i = 0;
-  for (auto &it: trace) {
-    auto &curQueue = statistics[it.id];
-    const auto curQueueLen = curQueue.size();
-    // drop features larger than 50
-    if (curQueueLen > HISTFEATURES) {
-      curQueue.pop_back();
-    }
-    // print features
-    if(it.toCache) {
-      outfile << 1 << " ";
-    } else {
-      outfile << 0 << " ";
-    }
-    size_t idx = 0;
-    uint64_t lastReqTime = i;
-    for (auto &lit: curQueue) {
-      const uint64_t dist = lastReqTime - lit; // distance
-      outfile << idx << ":" << dist << " ";
-      idx++;
-      lastReqTime = lit;
-    }
-
-    // object size
-    outfile << HISTFEATURES << ":" << round(100.0*log2(it.size)) << " ";
-
-    // update cache size
-    uint64_t currentsize;
-    if (cacheAvailBytes <= 0) {
-      if (cacheAvailBytes < 0) {
-        negcachesize++; // that's bad
-      }
-      currentsize = 0;
-    } else {
-      currentsize = round(100.0*log2(cacheAvailBytes));
-    }
-    outfile << HISTFEATURES+1 << ":" << currentsize << " ";
-    outfile << HISTFEATURES+2 << ":" << it.cost << "\n";
-
-    if (cache.count(it.id) == 0) {
-      // we have never seen this id
-      if(it.toCache) {
-        cacheAvailBytes -= it.size;
-        cache[it.id].cached = true;
-      } else {
-        cache[it.id].cached = false;
-      }
-      cache[it.id].osize = it.size;
-    } else {
-      // repeated request to this id
-      if (cache[it.id].cached && !it.toCache) {
-        // used to be cached, but not any more
-        cacheAvailBytes += cache[it.id].osize;
-        cache[it.id].cached = false;
-      } else if (!cache[it.id].cached && it.toCache) {
-        // wasn't cached, but now it is
-        cacheAvailBytes -= it.size;
-        cache[it.id].cached = true;
-      }
-      cache[it.id].osize = it.size;
-    }
-
-    // update queue
-    curQueue.push_front(i++);
-  }
-
-  cerr << "neg. cache size: " << negcachesize << "\n";
-  outfile.close();
-}
 
 void check(const vector<trEntry> &opt, const string &path, float cutoff, ofstream &out) {
   ifstream infile(path);
@@ -218,16 +93,118 @@ void check(const vector<trEntry> &opt, const string &path, float cutoff, ofstrea
   infile.close();
 }
 
-void trainModel(const string &trace, bool init) {
-  const string train_trace = "train_" + trace;
-  const string test_trace = "test_" + trace;
-  const string model = trace + ".model";
-  const string train_result = train_trace + ".predict";
-  const string test_result = test_trace + ".predict";
-  const string result = trace + ".result";
+uint64_t cacheSize;
+uint64_t windowSize;
+bool init = true;
+BoosterHandle booster;
 
-  unordered_map<string, string> train_params = {
-          {"task", "train"},
+// from (id, size) to idx
+unordered_map<pair<uint64_t, uint64_t>, uint64_t> windowLastSeen;
+vector<optEntry> windowOpt;
+vector<trEntry> windowTrace;
+uint64_t windowByteSum = 0;
+
+ofstream resultFile;
+
+void calculateOPT() {
+  sort(windowOpt.begin(), windowOpt.end(), [](const optEntry& lhs, const optEntry& rhs) {
+    return lhs.volume < rhs.volume;
+  });
+
+  uint64_t cacheVolume = cacheSize * windowSize;
+  uint64_t currentVolume = 0;
+  uint64_t hitc = 0;
+  uint64_t bytehitc = 0;
+  for (auto &it: windowOpt) {
+    if (currentVolume > cacheVolume) {
+      break;
+    }
+    if (it.hasNext) {
+      hitc++;
+      bytehitc += windowTrace[it.idx].size;
+      currentVolume += it.volume;
+    }
+  }
+  resultFile << "PFOO-L ohr: " << double(hitc)/windowSize << " bhr: " << double(bytehitc)/windowByteSum << endl;
+}
+
+// purpose: derive features and count how many features are inconsistent
+void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> &indices, vector<double> &data) {
+  int64_t cacheAvailBytes = cacheSize;
+  // from id to intervals
+  unordered_map<uint64_t, list<uint64_t> > statistics;
+  // from id to size
+  unordered_map<uint64_t, uint64_t> cache;
+  uint64_t negCacheSize = 0;
+
+  uint64_t i = 0;
+  indptr.push_back(0);
+  for (auto &it: windowTrace) {
+    auto &curQueue = statistics[it.id];
+    const auto curQueueLen = curQueue.size();
+    // drop features larger than 50
+    if (curQueueLen > HISTFEATURES) {
+      curQueue.pop_back();
+    }
+
+    labels.push_back(it.toCache ? 1 : 0);
+
+    // derive features
+    int32_t idx = 0;
+    uint64_t lastReqTime = i;
+    for (auto &lit: curQueue) {
+      const uint64_t dist = lastReqTime - lit; // distance
+      indices.push_back(idx);
+      data.push_back(dist);
+      idx++;
+      lastReqTime = lit;
+    }
+
+    // object size
+    indices.push_back(HISTFEATURES);
+    data.push_back(round(100.0*log2(it.size)));
+
+    double currentSize;
+    if (cacheAvailBytes <= 0) {
+      if (cacheAvailBytes < 0) {
+        negCacheSize++; // that's bad
+      }
+      currentSize = 0;
+    } else {
+      currentSize = round(100.0*log2(cacheAvailBytes));
+    }
+    indices.push_back(HISTFEATURES + 1);
+    data.push_back(currentSize);
+    indices.push_back(HISTFEATURES + 2);
+    data.push_back(it.cost);
+
+    indptr.push_back(indptr[i] + idx + 3);
+
+    // update cache size
+    if (cache.count(it.id) == 0) {
+      // we have never seen this id
+      if(it.toCache) {
+        cacheAvailBytes -= it.size;
+        cache[it.id] = it.size;
+      }
+    } else {
+      // repeated request to this id
+      if (!it.toCache) {
+        // used to be cached, but not any more
+        cacheAvailBytes += cache[it.id];
+        cache.erase(it.id);
+      }
+    }
+
+    // update queue
+    curQueue.push_front(i++);
+  }
+
+  resultFile << "neg. cache size: " << negCacheSize << endl;
+}
+
+void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> &indices, vector<double> &data) {
+  unordered_map<string, string> trainParams = {
           {"boosting", "gbdt"},
           {"objective", "binary"},
           {"metric", "binary_logloss,auc"},
@@ -246,36 +223,86 @@ void trainModel(const string &trace, bool init) {
           {"min_sum_hessian_in_leaf", "5.0"},
           {"is_enable_sparse", "true"},
           {"two_round", "false"},
-          {"save_binary", "false"},
-          {"data", train_trace},
-          {"valid", test_trace},
-          {"input_model", init ? "" : model},
-          {"output_model", model}
+          {"save_binary", "false"}
   };
 
-  unordered_map<string, string> predict_params1 = {
-          {"task", "predict"},
-          {"data", train_trace},
-          {"input_model", model},
-          {"output_result", train_result}
-  };
+  // create training dataset
+  DatasetHandle trainData;
+  LGBM_DatasetCreateFromCSR(static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
+                            static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
+                            indptr.size(), data.size(), HISTFEATURES + 3,
+                            trainParams, nullptr, &trainData);
+  LGBM_DatasetSetField(trainData, "label", static_cast<void*>(labels.data()), labels.size(), C_API_DTYPE_FLOAT32);
 
-  unordered_map<string, string> predict_params2 = {
-          {"task", "predict"},
-          {"data", test_trace},
-          {"input_model", model},
-          {"output_result", test_result}
-  };
+  // init booster
+  if (init) {
+    LGBM_BoosterCreate(trainData, trainParams, &booster);
+    init = false;
+  } else {
+    int64_t len;
+    LGBM_BoosterCalcNumPredict(booster, indptr.size() - 1, C_API_PREDICT_LEAF_INDEX, 0, &len);
+    vector<double> result(len);
+    LGBM_BoosterPredictForCSR(booster, static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
+                              static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
+                              indptr.size(), data.size(), HISTFEATURES + 3,
+                              C_API_PREDICT_LEAF_INDEX, 0, trainParams, &len, result.data());
+    BoosterHandle newBooster;
+    LGBM_BoosterCreate(trainData, trainParams, &newBooster);
+    LGBM_BoosterMerge(newBooster, booster);
+    vector<int32_t> predLeaf(result.begin(), result.end());
+    result.clear();
+    LGBM_BoosterRefit(newBooster, predLeaf.data(), indptr.size() - 1, 1);
+    booster = newBooster;
+  }
 
   // train
-  LightGBM::Application train_app(train_params);
-  train_app.Run();
+  for (int i = 0; i < stoi(trainParams["num_iterations"]); i++) {
+    int isFinished;
+    LGBM_BoosterUpdateOneIter(booster, &isFinished);
+    if (isFinished) {
+      resultFile << "Finish training" << endl;
+      break;
+    }
+  }
+}
 
-  // predict
-  LightGBM::Application predict_app1(predict_params1);
-  predict_app1.Run();
-  LightGBM::Application predict_app2(predict_params2);
-  predict_app2.Run();
+void aggregateForWindow(uint64_t seq, uint64_t id, uint64_t size, double cost) {
+  if (seq % windowSize == 0) { // the end of a window
+    calculateOPT();
+
+    vector<float> labels;
+    vector<int32_t> indptr;
+    vector<int32_t> indices;
+    vector<double> data;
+    deriveFeatures(labels, indptr, indices, data);
+    trainModel(labels, indptr, indices, data);
+
+    windowByteSum = 0;
+    windowLastSeen.clear();
+    windowOpt.clear();
+    windowTrace.clear();
+  } else {
+    const uint64_t idx = seq % windowSize - 1;
+    const auto idsize = make_pair(id, size);
+    // why size would be <= 0?
+    if (size > 0 && windowLastSeen.count(idsize) > 0) {
+      windowOpt[windowLastSeen[idsize]].hasNext = true;
+      windowOpt[windowLastSeen[idsize]].volume = (idx - windowLastSeen[idsize]) * size;
+    }
+    windowByteSum += size;
+    windowLastSeen[idsize] = idx;
+    windowOpt.emplace_back(idx);
+    windowTrace.emplace_back(id, size, cost);
+  }
+}
+
+void processCacheHitMiss() {
+
+}
+
+void processRequest(uint64_t seq, uint64_t id, uint64_t size, double cost) {
+  processCacheHitMiss();
+  aggregateForWindow(seq, id, size, cost);
 }
 
 int main(int argc, char* argv[]) {
@@ -285,61 +312,31 @@ int main(int argc, char* argv[]) {
   }
 
   // input path
-  const string path = argv[1];
+  const string tracePath = argv[1];
   // trace name
-  string trace;
-  const size_t dirSlashIdx = path.rfind('/');
+  string traceName = tracePath;
+  const size_t dirSlashIdx = tracePath.rfind('/');
   if (string::npos != dirSlashIdx) {
-    trace = path.substr(dirSlashIdx + 1, path.length());
-  } else {
-    trace = path;
+    traceName = tracePath.substr(dirSlashIdx + 1, tracePath.length());
   }
-  const string trainPath = "train_" + trace;
-  const string testPath = "test_" + trace;
+  const string trainPath = "train_" + traceName;
+  const string testPath = "test_" + traceName;
   // cache size
-  uint64_t cacheSize = stoull(argv[2]);
+  cacheSize = stoull(argv[2]);
   // window size
-  uint64_t windowSize = stoull(argv[3]);
+  windowSize = stoull(argv[3]);
 
-  ifstream traceFile(path);
-  ofstream resultFile(trace + ".result");
+  ifstream traceFile(tracePath);
+  resultFile.open(tracePath + ".result");
   auto timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
   resultFile << ctime(&timenow) << "start" << endl;
-  vector<trEntry> trainTrace;
-  vector<trEntry> testTrace;
-  bool init = true;
-  while (true) {
-    trainTrace.clear();
-    testTrace.clear();
-    uint64_t res = calculateOPT(trainTrace, traceFile, cacheSize, windowSize);
-    if (res < windowSize) {
-      cerr << "file too short" << endl;
-      break;
-    }
-    calculateOPT(testTrace, traceFile, cacheSize, windowSize);
-    // currently still write features to files first, then load data from file for LightGBM
-    // TODO: change to create dataset directly from in memory data structures
-    // Try ConstructFromSampleData in dataset_loader.h
-    deriveFeatures(trainTrace, trainPath, cacheSize);
-    deriveFeatures(testTrace, testPath, cacheSize);
-    trainModel(trace, init);
-    init = false;
-    for (int cutoff = 1; cutoff < 10; cutoff += 1) {
-      resultFile << trace << " train " << cutoff/10.0 << endl;
-      check(trainTrace, trainPath + ".predict", static_cast<float>(cutoff / 10.0), resultFile);
-      resultFile << trace << " test " << cutoff/10.0 << endl;
-      check(testTrace, testPath + ".predict", static_cast<float>(cutoff / 10.0), resultFile);
-    }
-    resultFile << endl;
-    timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
-    resultFile << ctime(&timenow);
+
+  uint64_t seq, id, size;
+  double cost;
+  // seq starts from 1
+  while (traceFile >> seq >> id >> size >> cost) {
+    processRequest(seq, id, size, cost);
   }
-
-  traceFile.close();
-  resultFile.close();
-
-  timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
-  resultFile << ctime(&timenow) << "end" << endl;
 
   return 0;
 }
