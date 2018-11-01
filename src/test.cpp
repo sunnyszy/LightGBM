@@ -120,6 +120,7 @@ void calculateOPT() {
       break;
     }
     if (it.hasNext) {
+      windowTrace[it.idx].toCache = true;
       hitc++;
       bytehitc += windowTrace[it.idx].size;
       currentVolume += it.volume;
