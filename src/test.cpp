@@ -23,14 +23,17 @@ inline void hash_combine(size_t & seed, const T & v) {
   seed ^= hasher(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
-template<typename S, typename T> struct hash<pair<S, T>> {
-  inline size_t operator()(const pair<S, T> & v) const {
-    size_t seed = 0;
-    hash_combine(seed, v.first);
-    hash_combine(seed, v.second);
-    return seed;
-  }
-};
+namespace std {
+  template<typename S, typename T>
+  struct hash<pair<S, T>> {
+    inline size_t operator()(const pair<S, T> &v) const {
+      size_t seed = 0;
+      hash_combine(seed, v.first);
+      hash_combine(seed, v.second);
+      return seed;
+    }
+  };
+}
 
 struct optEntry {
   uint64_t idx;
@@ -212,6 +215,14 @@ void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> 
     // init booster
     resultFile << "init booster" << endl;
     LGBM_BoosterCreate(trainData, trainParams, &booster);
+    // train
+    for (int i = 0; i < stoi(trainParams["num_iterations"]); i++) {
+      int isFinished;
+      LGBM_BoosterUpdateOneIter(booster, &isFinished);
+      if (isFinished) {
+        break;
+      }
+    }
     init = false;
   } else {
     // evaluate booster
@@ -239,14 +250,6 @@ void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> 
     booster = newBooster;
   }
 
-  // train
-  for (int i = 0; i < stoi(trainParams["num_iterations"]); i++) {
-    int isFinished;
-    LGBM_BoosterUpdateOneIter(booster, &isFinished);
-    if (isFinished) {
-      break;
-    }
-  }
   auto timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
   resultFile << ctime(&timenow) << "finish training" << endl;
 }
@@ -366,7 +369,7 @@ void processCacheHitMiss(uint64_t seq, uint64_t id, uint64_t size, double cost) 
 }
 
 void processRequest(uint64_t seq, uint64_t id, uint64_t size, double cost) {
-  processCacheHitMiss(seq, id, size, cost);
+//  processCacheHitMiss(seq, id, size, cost);
   aggregateForWindow(seq, id, size, cost);
 }
 
