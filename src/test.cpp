@@ -67,6 +67,8 @@ uint64_t windowByteSum = 0;
 ofstream resultFile;
 
 void calculateOPT() {
+  auto timeBegin = chrono::system_clock::now();
+
   sort(windowOpt.begin(), windowOpt.end(), [](const optEntry& lhs, const optEntry& rhs) {
     return lhs.volume < rhs.volume;
   });
@@ -77,7 +79,6 @@ void calculateOPT() {
   uint64_t bytehitc = 0;
   for (auto &it: windowOpt) {
     if (currentVolume > cacheVolume) {
-      resultFile << "break" << endl;
       break;
     }
     if (it.hasNext) {
@@ -87,11 +88,15 @@ void calculateOPT() {
       currentVolume += it.volume;
     }
   }
-  resultFile << "PFOO-L ohr: " << double(hitc)/windowSize << " bhr: " << double(bytehitc)/windowByteSum << endl;
+  resultFile << cacheSize << " " << windowSize << " " << double(hitc) / windowSize << " " << double(bytehitc) / windowByteSum << endl;
+
+  resultFile << "Calculate OPT: " << chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timeBegin).count() << " ms" << endl;
 }
 
 // purpose: derive features and count how many features are inconsistent
 void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> &indices, vector<double> &data) {
+  auto timeBegin = chrono::system_clock::now();
+
   int64_t cacheAvailBytes = cacheSize;
   // from id to intervals
   unordered_map<uint64_t, list<uint64_t> > statistics;
@@ -162,10 +167,16 @@ void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32
     curQueue.push_front(i++);
   }
 
-  resultFile << "neg. cache size: " << negCacheSize << endl;
+  if (negCacheSize > 0) {
+    resultFile << "Negative cache size: " << negCacheSize << endl;
+  }
+
+  resultFile << "Derive features: " << chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timeBegin).count() << " ms" << endl;
 }
 
-void check(const vector<float> &labels, const vector<double> &result) {
+void checkError(const vector<float> &labels, const vector<double> &result) {
+  auto timeBegin = chrono::system_clock::now();
+
   uint64_t fp = 0, fn = 0;
 
   for (size_t i = 0; i < labels.size(); i++) {
@@ -177,10 +188,13 @@ void check(const vector<float> &labels, const vector<double> &result) {
     }
   }
 
-  resultFile << cutoff << " " << labels.size() << " " << fp << " " << fn << " " << endl;
+  resultFile << cacheSize << " " << windowSize << " " << cutoff << " " << (double) fp / labels.size() << " " << (double) fn / labels.size() << endl;
+  resultFile << "Check error: " << chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timeBegin).count() << " ms" << endl;
 }
 
 void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> &indices, vector<double> &data) {
+  auto timeBegin = chrono::system_clock::now();
+
   unordered_map<string, string> trainParams = {
           {"boosting", "gbdt"},
           {"objective", "binary"},
@@ -213,7 +227,6 @@ void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> 
 
   if (init) {
     // init booster
-    resultFile << "init booster" << endl;
     LGBM_BoosterCreate(trainData, trainParams, &booster);
     // train
     for (int i = 0; i < stoi(trainParams["num_iterations"]); i++) {
@@ -232,29 +245,41 @@ void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> 
                               static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
                               indptr.size(), data.size(), HISTFEATURES + 3,
                               C_API_PREDICT_NORMAL, 0, trainParams, &len, result.data());
-    check(labels, result);
+    checkError(labels, result);
+
+    BoosterHandle newBooster;
+    LGBM_BoosterCreate(trainData, trainParams, &newBooster);
+
     // refit existing booster
-    resultFile << "refit booster" << endl;
+    resultFile << "Refit existing booster" << endl;
     LGBM_BoosterCalcNumPredict(booster, indptr.size() - 1, C_API_PREDICT_LEAF_INDEX, 0, &len);
-    result.resize(len);
+    vector<double> tmp(len);
     LGBM_BoosterPredictForCSR(booster, static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
                               static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
                               indptr.size(), data.size(), HISTFEATURES + 3,
-                              C_API_PREDICT_LEAF_INDEX, 0, trainParams, &len, result.data());
-    BoosterHandle newBooster;
-    LGBM_BoosterCreate(trainData, trainParams, &newBooster);
+                              C_API_PREDICT_LEAF_INDEX, 0, trainParams, &len, tmp.data());
+    vector<int32_t> predLeaf(tmp.begin(), tmp.end());
+    tmp.clear();
     LGBM_BoosterMerge(newBooster, booster);
-    vector<int32_t> predLeaf(result.begin(), result.end());
-    result.clear();
     LGBM_BoosterRefit(newBooster, predLeaf.data(), indptr.size() - 1, predLeaf.size() / (indptr.size() - 1));
+
+    // alternative: train a new booster
+//    resultFile << "Train a new booster" << endl;
+//    for (int i = 0; i < stoi(trainParams["num_iterations"]); i++) {
+//      int isFinished;
+//      LGBM_BoosterUpdateOneIter(newBooster, &isFinished);
+//      if (isFinished) {
+//        break;
+//      }
+//    }
+
     booster = newBooster;
   }
 
-  auto timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
-  resultFile << ctime(&timenow) << "finish training" << endl;
+  resultFile << "Train model: " << chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timeBegin).count() << " ms" << endl;
 }
 
-void aggregateForWindow(uint64_t seq, uint64_t id, uint64_t size, double cost) {
+void processRequest(uint64_t seq, uint64_t id, uint64_t size, double cost) {
   const uint64_t idx = (seq - 1) % windowSize;
   const auto idsize = make_pair(id, size);
   // why size would be <= 0?
@@ -267,6 +292,10 @@ void aggregateForWindow(uint64_t seq, uint64_t id, uint64_t size, double cost) {
   windowOpt.emplace_back(idx);
   windowTrace.emplace_back(id, size, cost);
   if (seq % windowSize == 0) { // the end of a window
+    auto timeBegin = chrono::system_clock::now();
+    auto timenow = chrono::system_clock::to_time_t(timeBegin);
+    resultFile << "Start processing window " << seq / windowSize << ": " << ctime(&timenow);
+
     calculateOPT();
 
     vector<float> labels;
@@ -280,97 +309,12 @@ void aggregateForWindow(uint64_t seq, uint64_t id, uint64_t size, double cost) {
     windowLastSeen.clear();
     windowOpt.clear();
     windowTrace.clear();
+
+    auto timeEnd = chrono::system_clock::now();
+    timenow = chrono::system_clock::to_time_t(timeEnd);
+    resultFile << "Finish processing window " << seq / windowSize << ": " << ctime(&timenow);
+    resultFile << "Process window: " << chrono::duration_cast<chrono::milliseconds>(timeEnd - timeBegin).count() << " ms" << endl << endl;
   }
-}
-
-int64_t cacheAvailBytes;
-// from id to intervals
-unordered_map<uint64_t, list<uint64_t> > statistics;
-// from id to size
-unordered_map<uint64_t, uint64_t> cache;
-uint64_t negCacheSize = 0;
-
-void processCacheHitMiss(uint64_t seq, uint64_t id, uint64_t size, double cost) {
-  vector<int32_t> indptr;
-  vector<int32_t> indices;
-  vector<double> data;
-
-  indptr.push_back(0);
-  auto &curQueue = statistics[id];
-  const auto curQueueLen = curQueue.size();
-  // drop features larger than 50
-  if (curQueueLen > HISTFEATURES) {
-    curQueue.pop_back();
-  }
-
-  // derive features
-  int32_t idx = 0;
-  uint64_t lastReqTime = seq;
-  for (auto &lit: curQueue) {
-    const uint64_t dist = lastReqTime - lit; // distance
-    indices.push_back(idx);
-    data.push_back(dist);
-    idx++;
-    lastReqTime = lit;
-  }
-
-  // object size
-  indices.push_back(HISTFEATURES);
-  data.push_back(round(100.0*log2(size)));
-
-  double currentSize;
-  if (cacheAvailBytes <= 0) {
-    if (cacheAvailBytes < 0) {
-      negCacheSize++; // that's bad
-    }
-    currentSize = 0;
-  } else {
-    currentSize = round(100.0*log2(cacheAvailBytes));
-  }
-  indices.push_back(HISTFEATURES + 1);
-  data.push_back(currentSize);
-  indices.push_back(HISTFEATURES + 2);
-  data.push_back(cost);
-
-  indptr.push_back(idx + 3);
-
-  // predict
-  if (!init) {
-    int64_t len;
-    LGBM_BoosterCalcNumPredict(booster, indptr.size() - 1, C_API_PREDICT_NORMAL, 0, &len);
-    vector<double> result(len);
-    LGBM_BoosterPredictForCSR(booster, static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
-                              static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
-                              indptr.size(), data.size(), HISTFEATURES + 3,
-                              C_API_PREDICT_NORMAL, 0, unordered_map<string, string>(), &len, result.data());
-    // update cache size
-    if (cache.count(id) == 0) {
-      // we have never seen this id
-      if(result[0] >= cutoff) {
-        cacheAvailBytes -= size;
-        cache[id] = size;
-      }
-    } else {
-      // repeated request to this id
-      if (result[0] < cutoff) {
-        // used to be cached, but not any more
-        cacheAvailBytes += cache[id];
-        cache.erase(id);
-      }
-    }
-  }
-
-  // update queue
-  curQueue.push_front(seq);
-
-  if (negCacheSize > 0) {
-    resultFile << "neg. cache size: " << negCacheSize << endl;
-  }
-}
-
-void processRequest(uint64_t seq, uint64_t id, uint64_t size, double cost) {
-//  processCacheHitMiss(seq, id, size, cost);
-  aggregateForWindow(seq, id, size, cost);
 }
 
 int main(int argc, char* argv[]) {
@@ -389,7 +333,6 @@ int main(int argc, char* argv[]) {
   }
   // cache size
   cacheSize = stoull(argv[2]);
-  cacheAvailBytes = cacheSize;
   // window size
   windowSize = stoull(argv[3]);
   // cutoff
@@ -398,14 +341,43 @@ int main(int argc, char* argv[]) {
   ifstream traceFile(tracePath);
   auto timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
   resultFile.open(tracePath + ".result." + to_string(timenow));
-  resultFile << ctime(&timenow) << traceName << " " << cacheSize << " " << windowSize << " " << cutoff << endl;
+  resultFile << "Start: " << ctime(&timenow) << traceName << " " << cacheSize << " " << windowSize << " " << cutoff << endl << endl;
 
   uint64_t seq, id, size;
   double cost;
+//  unordered_set<uint64_t> once;
+//  unordered_set<uint64_t> twice;
+//  unordered_set<uint64_t> three;
+//  unordered_set<uint64_t> other;
+//  uint64_t onceBytes = 0;
+//  uint64_t twiceBytes = 0;
+//  uint64_t threeBytes = 0;
+//  ofstream out("output");
   // seq starts from 1
   while (traceFile >> seq >> id >> size >> cost) {
+//    if ((seq - 1) % 1000000 == 0) {
+//      out << (seq - 1) / 1000000 << " " << onceBytes << " " << twiceBytes << " " << threeBytes << endl;
+//    }
+//    if (other.count(id) == 0) {
+//      if (three.count(id) > 0) {
+//        three.erase(id);
+//        other.insert(id);
+//      } else if (twice.count(id) > 0) {
+//        twice.erase(id);
+//        three.insert(id);
+//        threeBytes += size;
+//      } else if (once.count(id) > 0) {
+//        once.erase(id);
+//        twice.insert(id);
+//        twiceBytes += size;
+//      } else {
+//        once.insert(id);
+//        onceBytes += size;
+//      }
+//    }
     processRequest(seq, id, size, cost);
   }
+//  out.close();
 
   return 0;
 }
