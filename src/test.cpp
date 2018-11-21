@@ -1,14 +1,15 @@
-#include <fstream>
-#include <string>
-#include <iostream>
+#include <algorithm>
 #include <chrono>
 #include <ctime>
-#include <unordered_map>
+#include <fstream>
+#include <iostream>
 #include <list>
-#include <regex>
 #include <math.h>
+#include <random>
+#include <regex>
+#include <string>
+#include <unordered_map>
 #include <vector>
-#include <algorithm>
 #include <LightGBM/application.h>
 #include <LightGBM/c_api.h>
 
@@ -52,11 +53,38 @@ struct trEntry {
   trEntry(uint64_t id, uint64_t size, double cost) : id(id), size(size), cost(cost), toCache(false) {};
 };
 
+random_device rd;  //Will be used to obtain a seed for the random number engine
+mt19937 gen(rd()); //Standard mersenne_twister_engine seeded with rd()
+uniform_real_distribution<> dis(0.0, 1.0);
+
 uint64_t cacheSize;
 uint64_t windowSize;
+uint64_t sampleSize;
 double cutoff;
+int sampling;
 bool init = true;
 BoosterHandle booster;
+unordered_map<string, string> trainParams = {
+        {"boosting", "gbdt"},
+        {"objective", "binary"},
+        {"metric", "binary_logloss,auc"},
+        {"metric_freq", "1"},
+        {"is_provide_training_metric", "true"},
+        {"max_bin", "255"},
+        {"num_iterations", "50"},
+        {"learning_rate", "0.1"},
+        {"num_leaves", "31"},
+        {"tree_learner", "serial"},
+        {"num_threads", "40"},
+        {"feature_fraction", "0.8"},
+        {"bagging_freq", "5"},
+        {"bagging_fraction", "0.8"},
+        {"min_data_in_leaf", "50"},
+        {"min_sum_hessian_in_leaf", "5.0"},
+        {"is_enable_sparse", "true"},
+        {"two_round", "false"},
+        {"save_binary", "false"}
+};
 
 // from (id, size) to idx
 unordered_map<pair<uint64_t, uint64_t>, uint64_t> windowLastSeen;
@@ -94,7 +122,7 @@ void calculateOPT() {
 }
 
 // purpose: derive features and count how many features are inconsistent
-void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> &indices, vector<double> &data) {
+void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> &indices, vector<double> &data, int sampling) {
   auto timeBegin = chrono::system_clock::now();
 
   int64_t cacheAvailBytes = cacheSize;
@@ -114,38 +142,40 @@ void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32
       curQueue.pop_back();
     }
 
-    labels.push_back(it.toCache ? 1 : 0);
-
-    // derive features
-    int32_t idx = 0;
-    uint64_t lastReqTime = i;
-    for (auto &lit: curQueue) {
-      const uint64_t dist = lastReqTime - lit; // distance
-      indices.push_back(idx);
-      data.push_back(dist);
-      idx++;
-      lastReqTime = lit;
+    bool flag = true;
+    if (sampling == 1) {
+      flag = i >= (windowSize - sampleSize);
     }
+    if (sampling == 2) {
+      double rand = dis(gen);
+      flag = rand < (double)sampleSize/windowSize;
+    }
+    if (flag) {
+      labels.push_back(it.toCache ? 1 : 0);
 
-    // object size
-    indices.push_back(HISTFEATURES);
-    data.push_back(round(100.0*log2(it.size)));
-
-    double currentSize;
-    if (cacheAvailBytes <= 0) {
-      if (cacheAvailBytes < 0) {
-        negCacheSize++; // that's bad
+      // derive features
+      int32_t idx = 0;
+      uint64_t lastReqTime = i;
+      for (auto &lit: curQueue) {
+        const uint64_t dist = lastReqTime - lit; // distance
+        indices.push_back(idx);
+        data.push_back(dist);
+        idx++;
+        lastReqTime = lit;
       }
-      currentSize = 0;
-    } else {
-      currentSize = round(100.0*log2(cacheAvailBytes));
-    }
-    indices.push_back(HISTFEATURES + 1);
-    data.push_back(currentSize);
-    indices.push_back(HISTFEATURES + 2);
-    data.push_back(it.cost);
 
-    indptr.push_back(indptr[i] + idx + 3);
+      // object size
+      indices.push_back(HISTFEATURES);
+      data.push_back(round(100.0 * log2(it.size)));
+
+      double currentSize = cacheAvailBytes <= 0 ? 0 : round(100.0 * log2(cacheAvailBytes));
+      indices.push_back(HISTFEATURES + 1);
+      data.push_back(currentSize);
+      indices.push_back(HISTFEATURES + 2);
+      data.push_back(it.cost);
+
+      indptr.push_back(indptr[indptr.size() - 1] + idx + 3);
+    }
 
     // update cache size
     if (cache.count(it.id) == 0) {
@@ -163,6 +193,10 @@ void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32
       }
     }
 
+    if (cacheAvailBytes < 0) {
+      negCacheSize++; // that's bad
+    }
+
     // update queue
     curQueue.push_front(i++);
   }
@@ -174,8 +208,22 @@ void deriveFeatures(vector<float> &labels, vector<int32_t> &indptr, vector<int32
   resultFile << "Derive features: " << chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timeBegin).count() << " ms" << endl;
 }
 
-void checkError(const vector<float> &labels, const vector<double> &result) {
+void evaluateModel() {
   auto timeBegin = chrono::system_clock::now();
+
+  // evaluate booster
+  vector<float> labels;
+  vector<int32_t> indptr;
+  vector<int32_t> indices;
+  vector<double> data;
+  deriveFeatures(labels, indptr, indices, data, 0);
+  resultFile << "Data size for evaluation: " << labels.size() << endl;
+  int64_t len;
+  vector<double> result(indptr.size() - 1);
+  LGBM_BoosterPredictForCSR(booster, static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
+                            static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
+                            indptr.size(), data.size(), HISTFEATURES + 3,
+                            C_API_PREDICT_NORMAL, 0, trainParams, &len, result.data());
 
   uint64_t fp = 0, fn = 0;
 
@@ -188,34 +236,12 @@ void checkError(const vector<float> &labels, const vector<double> &result) {
     }
   }
 
-  resultFile << cacheSize << " " << windowSize << " " << cutoff << " " << (double) fp / labels.size() << " " << (double) fn / labels.size() << endl;
-  resultFile << "Check error: " << chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timeBegin).count() << " ms" << endl;
+  resultFile << cacheSize << " " << windowSize << " " << sampleSize << " " << cutoff << " " << sampling << " " << (double) fp / labels.size() << " " << (double) fn / labels.size() << endl;
+  resultFile << "Evaluate model: " << chrono::duration_cast<chrono::milliseconds>(chrono::system_clock::now() - timeBegin).count() << " ms" << endl;
 }
 
 void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> &indices, vector<double> &data) {
   auto timeBegin = chrono::system_clock::now();
-
-  unordered_map<string, string> trainParams = {
-          {"boosting", "gbdt"},
-          {"objective", "binary"},
-          {"metric", "binary_logloss,auc"},
-          {"metric_freq", "1"},
-          {"is_provide_training_metric", "true"},
-          {"max_bin", "255"},
-          {"num_iterations", "50"},
-          {"learning_rate", "0.1"},
-          {"num_leaves", "31"},
-          {"tree_learner", "serial"},
-          {"num_threads", "40"},
-          {"feature_fraction", "0.8"},
-          {"bagging_freq", "5"},
-          {"bagging_fraction", "0.8"},
-          {"min_data_in_leaf", "50"},
-          {"min_sum_hessian_in_leaf", "5.0"},
-          {"is_enable_sparse", "true"},
-          {"two_round", "false"},
-          {"save_binary", "false"}
-  };
 
   // create training dataset
   DatasetHandle trainData;
@@ -238,40 +264,32 @@ void trainModel(vector<float> &labels, vector<int32_t> &indptr, vector<int32_t> 
     }
     init = false;
   } else {
-    // evaluate booster
-    int64_t len;
-    vector<double> result(indptr.size() - 1);
-    LGBM_BoosterPredictForCSR(booster, static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
-                              static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
-                              indptr.size(), data.size(), HISTFEATURES + 3,
-                              C_API_PREDICT_NORMAL, 0, trainParams, &len, result.data());
-    checkError(labels, result);
-
     BoosterHandle newBooster;
     LGBM_BoosterCreate(trainData, trainParams, &newBooster);
 
     // refit existing booster
-    resultFile << "Refit existing booster" << endl;
-    LGBM_BoosterCalcNumPredict(booster, indptr.size() - 1, C_API_PREDICT_LEAF_INDEX, 0, &len);
-    vector<double> tmp(len);
-    LGBM_BoosterPredictForCSR(booster, static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
-                              static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
-                              indptr.size(), data.size(), HISTFEATURES + 3,
-                              C_API_PREDICT_LEAF_INDEX, 0, trainParams, &len, tmp.data());
-    vector<int32_t> predLeaf(tmp.begin(), tmp.end());
-    tmp.clear();
-    LGBM_BoosterMerge(newBooster, booster);
-    LGBM_BoosterRefit(newBooster, predLeaf.data(), indptr.size() - 1, predLeaf.size() / (indptr.size() - 1));
+//    resultFile << "Refit existing booster" << endl;
+//    int64_t len;
+//    LGBM_BoosterCalcNumPredict(booster, indptr.size() - 1, C_API_PREDICT_LEAF_INDEX, 0, &len);
+//    vector<double> tmp(len);
+//    LGBM_BoosterPredictForCSR(booster, static_cast<void*>(indptr.data()), C_API_DTYPE_INT32, indices.data(),
+//                              static_cast<void*>(data.data()), C_API_DTYPE_FLOAT64,
+//                              indptr.size(), data.size(), HISTFEATURES + 3,
+//                              C_API_PREDICT_LEAF_INDEX, 0, trainParams, &len, tmp.data());
+//    vector<int32_t> predLeaf(tmp.begin(), tmp.end());
+//    tmp.clear();
+//    LGBM_BoosterMerge(newBooster, booster);
+//    LGBM_BoosterRefit(newBooster, predLeaf.data(), indptr.size() - 1, predLeaf.size() / (indptr.size() - 1));
 
     // alternative: train a new booster
-//    resultFile << "Train a new booster" << endl;
-//    for (int i = 0; i < stoi(trainParams["num_iterations"]); i++) {
-//      int isFinished;
-//      LGBM_BoosterUpdateOneIter(newBooster, &isFinished);
-//      if (isFinished) {
-//        break;
-//      }
-//    }
+    resultFile << "Train a new booster" << endl;
+    for (int i = 0; i < stoi(trainParams["num_iterations"]); i++) {
+      int isFinished;
+      LGBM_BoosterUpdateOneIter(newBooster, &isFinished);
+      if (isFinished) {
+        break;
+      }
+    }
 
     booster = newBooster;
   }
@@ -298,11 +316,16 @@ void processRequest(uint64_t seq, uint64_t id, uint64_t size, double cost) {
 
     calculateOPT();
 
+    if (!init) {
+      evaluateModel();
+    }
+
     vector<float> labels;
     vector<int32_t> indptr;
     vector<int32_t> indices;
     vector<double> data;
-    deriveFeatures(labels, indptr, indices, data);
+    deriveFeatures(labels, indptr, indices, data, sampling);
+    resultFile << "Data size for training: " << labels.size() << endl;
     trainModel(labels, indptr, indices, data);
 
     windowByteSum = 0;
@@ -318,8 +341,8 @@ void processRequest(uint64_t seq, uint64_t id, uint64_t size, double cost) {
 }
 
 int main(int argc, char* argv[]) {
-  if (argc < 5) {
-    cerr << "parameters: tracePath cacheSize windowSize cutoff\n";
+  if (argc < 6) {
+    cerr << "parameters: tracePath cacheSize windowSize sampleSize cutoff sampling\n";
     return 1;
   }
 
@@ -335,49 +358,24 @@ int main(int argc, char* argv[]) {
   cacheSize = stoull(argv[2]);
   // window size
   windowSize = stoull(argv[3]);
+  // sample size for training
+  sampleSize = stoull(argv[4]);
   // cutoff
-  cutoff = stod(argv[4]);
+  cutoff = stod(argv[5]);
+  // sampling: 0 means no sampling, 1 means most recent, 2 means random
+  sampling = stoi(argv[6]);
 
   ifstream traceFile(tracePath);
   auto timenow = chrono::system_clock::to_time_t(chrono::system_clock::now());
   resultFile.open(tracePath + ".result." + to_string(timenow));
-  resultFile << "Start: " << ctime(&timenow) << traceName << " " << cacheSize << " " << windowSize << " " << cutoff << endl << endl;
+  resultFile << "Start: " << ctime(&timenow) << traceName << " " << cacheSize << " " << windowSize << " " << sampleSize << " " << cutoff << " " << sampling << endl << endl;
 
   uint64_t seq, id, size;
   double cost;
-//  unordered_set<uint64_t> once;
-//  unordered_set<uint64_t> twice;
-//  unordered_set<uint64_t> three;
-//  unordered_set<uint64_t> other;
-//  uint64_t onceBytes = 0;
-//  uint64_t twiceBytes = 0;
-//  uint64_t threeBytes = 0;
-//  ofstream out("output");
   // seq starts from 1
   while (traceFile >> seq >> id >> size >> cost) {
-//    if ((seq - 1) % 1000000 == 0) {
-//      out << (seq - 1) / 1000000 << " " << onceBytes << " " << twiceBytes << " " << threeBytes << endl;
-//    }
-//    if (other.count(id) == 0) {
-//      if (three.count(id) > 0) {
-//        three.erase(id);
-//        other.insert(id);
-//      } else if (twice.count(id) > 0) {
-//        twice.erase(id);
-//        three.insert(id);
-//        threeBytes += size;
-//      } else if (once.count(id) > 0) {
-//        once.erase(id);
-//        twice.insert(id);
-//        twiceBytes += size;
-//      } else {
-//        once.insert(id);
-//        onceBytes += size;
-//      }
-//    }
     processRequest(seq, id, size, cost);
   }
-//  out.close();
 
   return 0;
 }

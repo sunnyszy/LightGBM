@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import statistics
 
 
 def plot_bytes():
@@ -160,10 +161,75 @@ def plot_model():
     plt.show()
 
 
+def plot_sampling():
+    with open("sampling") as f:
+        samples = []
+        fps = []
+        fns = []
+        errs = []
+        for line in f:
+            _, _, sample, _, fp, fn, _, _ = line.split()
+            samples.append(int(sample) / 1000000)
+            fps.append(float(fp) * 100)
+            fns.append(float(fn) * 100)
+            errs.append((float(fp) + float(fn)) * 100)
+        fig, ax = plt.subplots()
+        ax.plot(samples, fps, label="False Positive (Accidentally Admitted)")
+        ax.plot(samples, fns, label="False Negative (Accidentally Not Admitted)", color='red', linestyle='dashed')
+        ax.plot(samples, errs, label="False Positive + False Negative", linestyle='-.')
+        ax.legend(loc='upper left')
+        plt.axis([0, 20, 0, 50])
+        plt.grid()
+        plt.xlabel('Most Recent Sample Size (m)')
+        plt.ylabel('Prediction Error [%]')
+        plt.title('Prediction Error vs. Most Recent Sample Size\n(32GB Cache, 20m Window, 0.5 Cutoff)')
+        plt.show()
+
+
+def plot_randomsampling():
+    with open("randomsampling") as f:
+        data = {}
+        for line in f:
+            _, _, sample, _, _, fp, fn, _, _ = line.split()
+            if sample not in data:
+                data[sample] = [[], [], []]
+            data[sample][0].append(float(fp) * 100)
+            data[sample][1].append(float(fn) * 100)
+            data[sample][2].append((float(fp) + float(fn)) * 100)
+        keys = []
+        fps = []
+        fpstds = []
+        fns = []
+        fnstds = []
+        errs = []
+        errstds = []
+        for key in data.keys():
+            keys.append(int(key)/1000000)
+            fps.append(statistics.mean(data[key][0]))
+            fpstds.append(statistics.stdev(data[key][0]))
+            fns.append(statistics.mean(data[key][1]))
+            fnstds.append(statistics.stdev(data[key][1]))
+            errs.append(statistics.mean(data[key][2]))
+            errstds.append(statistics.stdev(data[key][2]))
+        fig, ax = plt.subplots()
+        ax.errorbar(keys, fps, yerr=fpstds, label="False Positive (Accidentally Admitted)")
+        ax.errorbar(keys, fns, yerr=fnstds, label="False Negative (Accidentally Not Admitted)", color='red', linestyle='dashed')
+        ax.errorbar(keys, errs, yerr=errstds, label="False Positive + False Negative", linestyle='-.')
+        ax.legend(loc='upper left')
+        plt.axis([0, 20, 0, 20])
+        plt.grid()
+        plt.xlabel('Random Sample Size (m)')
+        plt.ylabel('Prediction Error [%]')
+        plt.title('Prediction Error vs. Random Sample Size\n(32GB Cache, 20m Window, 0.5 Cutoff)')
+        plt.show()
+
+
 # plot_cutoff()
 # plot_bytes()
 # plot_bhr()
 # plot_prediction()
 # plot_cache()
 # plot_time()
-plot_model()
+# plot_model()
+# plot_sampling()
+plot_randomsampling()
